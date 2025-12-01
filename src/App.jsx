@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 
+// --------- helpers ----------
+
 function clamp(v, min, max) {
   return v < min ? min : v > max ? max : v
 }
@@ -8,7 +10,19 @@ function lerp(a, b, t) {
   return a + (b - a) * t
 }
 
-// ------------ CONFIG -------------
+function randRange(a, b) {
+  return a + Math.random() * (b - a)
+}
+
+function randInt(a, b) {
+  return a + Math.floor(Math.random() * (b - a + 1))
+}
+
+function choose(arr) {
+  return arr[Math.floor(Math.random() * arr.length)]
+}
+
+// --------- config ----------
 
 const WORLD_SIZE = 6000
 const HALF_WORLD = WORLD_SIZE / 2
@@ -83,8 +97,8 @@ const WEAPONS = {
   laser: {
     name: 'Laser',
     levelRequired: 20,
-    baseDamage: 6, // используется как baseDamage, но наносится всем на луче*0.5
-    baseFireRate: 2, // 2 "тиков" в секунду
+    baseDamage: 6,
+    baseFireRate: 2, // 2 "тиков" в сек
     baseRange: 800,
     bulletSpeed: 0,
     pellets: 1,
@@ -158,7 +172,7 @@ const BOSS_TYPES = {
     radius: 46,
     hp: (wave) => 1000 + Math.max(0, wave - 20) * 100,
     color: '#eab308',
-    drops: { min: 0, max: 0, permanent: true, mega: true },
+    drops: { min: 0, max: 0, mega: true },
     isFinal: true,
   },
   bossXp: {
@@ -200,29 +214,22 @@ const TEMP_BUFF_DURATIONS = {
   immortal: 10,
 }
 
-function randRange(a, b) {
-  return a + Math.random() * (b - a)
-}
-
-function randInt(a, b) {
-  return a + Math.floor(Math.random() * (b - a + 1))
-}
-
-function choose(arr) {
-  return arr[Math.floor(Math.random() * arr.length)]
-}
-
-// ------------ APP -------------
+// --------- main app ----------
 
 export default function App() {
   const canvasRef = useRef(null)
   const leftJoy = useRef({ active: false, id: null, x: 0, y: 0 })
   const rightJoy = useRef({ active: false, id: null, x: 0, y: 0 })
 
+  const pausedRef = useRef(false)
+  const gameOverRef = useRef(false)
+
   const [size, setSize] = useState({
     w: typeof window !== 'undefined' ? window.innerWidth : 800,
     h: typeof window !== 'undefined' ? window.innerHeight : 600,
   })
+  const [paused, setPaused] = useState(false)
+  const [gameOver, setGameOver] = useState(false)
 
   useEffect(() => {
     const onResize = () => {
@@ -244,7 +251,6 @@ export default function App() {
     const state = {
       w: canvas.width,
       h: canvas.height,
-      time: 0,
       elapsed: 0,
       player: {
         x: 0,
@@ -260,7 +266,7 @@ export default function App() {
         immortalTimer: 0,
         xpBoostTimer: 0,
       },
-      weaponKey: 'pistol',
+      weaponKey: 'Pistol',
       bullets: [],
       enemyBullets: [],
       enemies: [],
@@ -280,10 +286,9 @@ export default function App() {
       },
       cam: { x: 0, y: 0 },
       fireCooldown: 0,
-      enemySpawnTimer: 0,
     }
 
-    function getCurrentWeapon() {
+    function getWeaponByLevel() {
       const lvl = state.level
       if (lvl >= WEAPONS.laser.levelRequired) return WEAPONS.laser
       if (lvl >= WEAPONS.rocket.levelRequired) return WEAPONS.rocket
@@ -309,10 +314,9 @@ export default function App() {
           p.damageMul *= 1.01
           break
         case 'critChance':
-          p.critChance = Math.min(p.critChance + 0.01, 0.5)
+          p.critChance = clamp(p.critChance + 0.01, 0, 0.5)
           break
         case 'critDamage':
-          // +1% = множитель * 1.01
           p.critMult *= 1.01
           break
         case 'range':
@@ -332,12 +336,7 @@ export default function App() {
 
     function addPickup(type, x, y) {
       if (!PICKUP_TYPES[type]) return
-      state.pickups.push({
-        type,
-        x,
-        y,
-        r: 9,
-      })
+      state.pickups.push({ type, x, y, r: 9 })
     }
 
     function spawnEnemiesForWave() {
@@ -350,7 +349,6 @@ export default function App() {
         const ex = state.player.x + Math.cos(ang) * dist
         const ey = state.player.y + Math.sin(ang) * dist
 
-        // тип врага по волне
         let typeKey = 'normal'
         if (wave >= 7 && Math.random() < 0.15) typeKey = 'shooter'
         else if (wave >= 5 && Math.random() < 0.2) typeKey = 'fast'
@@ -368,7 +366,7 @@ export default function App() {
         })
       }
 
-      // Shadow каждый 3-й волна начиная с 3
+      // Shadow каждая 3-я волна начиная с 3
       if (wave >= 3 && wave % 3 === 0) {
         const dist = randRange(1600, 2000)
         const ang = Math.random() * Math.PI * 2
@@ -386,7 +384,7 @@ export default function App() {
         })
       }
 
-      // боссы по схемам
+      // боссы
       const bossesToSpawn = []
 
       // boss1
@@ -429,43 +427,16 @@ export default function App() {
           x: clamp(ex, -HALF_WORLD, HALF_WORLD),
           y: clamp(ey, -HALF_WORLD, HALF_WORLD),
           r: def.radius,
-          hp: def.hp(wave),
-          maxHp: def.hp(wave),
+          hp: def.hp(state.wave),
+          maxHp: def.hp(state.wave),
         })
       }
 
       state.waveInProgress = true
     }
 
-    function levelUp() {
-      state.level += 1
-      const p = state.player
-      // +5% ко всем базовым статам, кроме критов и HP
-      p.damageMul *= 1.05
-      p.fireRateMul *= 1.05
-      p.rangeMul *= 1.05
-      p.bulletSpeedMul *= 1.05
-      p.magnetRadius *= 1.05
-      // HP полностью восстановить
-      p.hp = p.maxHp
-      // новая цель XP
-      state.xpToNext = Math.floor(10 + state.level * 3)
-    }
-
-    function addXp(amount) {
-      let gain = amount
-      if (state.tempBuffs.xpBoost > 0) gain *= 2
-      state.xp += gain
-      while (state.xp >= state.xpToNext) {
-        state.xp -= state.xpToNext
-        levelUp()
-      }
-    }
-
     function enemyDef(e, wave) {
-      if (e.bossType) {
-        return BOSS_TYPES[e.bossType]
-      }
+      if (e.bossType) return BOSS_TYPES[e.bossType]
       return ENEMY_TYPES[e.typeKey]
     }
 
@@ -489,13 +460,35 @@ export default function App() {
       }
     }
 
+    function levelUp() {
+      state.level += 1
+      const p = state.player
+      // +5% ко всем базовым статам, кроме критов и HP
+      p.damageMul *= 1.05
+      p.fireRateMul *= 1.05
+      p.rangeMul *= 1.05
+      p.bulletSpeedMul *= 1.05
+      p.magnetRadius *= 1.05
+      p.hp = p.maxHp
+      state.xpToNext = Math.floor(10 + state.level * 3)
+    }
+
+    function addXp(amount) {
+      let gain = amount
+      if (state.tempBuffs.xpBoost > 0) gain *= 2
+      state.xp += gain
+      while (state.xp >= state.xpToNext) {
+        state.xp -= state.xpToNext
+        levelUp()
+      }
+    }
+
     function onEnemyKilled(e) {
       const wave = state.wave
       addXp(1 + (e.bossType ? 4 : 0))
 
       const def = enemyDef(e, wave)
 
-      // специальные боссы
       if (e.bossType === 'bossXp') {
         addPickup('xpBoost', e.x, e.y)
         return
@@ -513,7 +506,6 @@ export default function App() {
         return
       }
 
-      // обычные враги: шанс пикапов
       if (!e.bossType) {
         if (Math.random() < 0.1) {
           const baseTypes = ['hp', 'radius', 'fireRate', 'damage', 'critChance', 'critDamage', 'range']
@@ -526,12 +518,8 @@ export default function App() {
         return
       }
 
-      // обычные боссы 1–4
-      const dropInfo = def.drops
-      if (!dropInfo) return
-
-      if (dropInfo.mega) {
-        // финальный — +50% к постоянным статам (кроме критов и движения)
+      if (def.drops?.mega) {
+        // финальный босс: +50% к постоянным статам (кроме критов и движения)
         const p = state.player
         p.damageMul *= 1.5
         p.fireRateMul *= 1.5
@@ -541,20 +529,22 @@ export default function App() {
         return
       }
 
-      const baseTypes = ['hp', 'radius', 'fireRate', 'damage', 'critChance', 'critDamage', 'range']
-      const num = randInt(dropInfo.min, dropInfo.max)
-      for (let i = 0; i < num; i++) {
-        addPickup(choose(baseTypes), e.x + randRange(-40, 40), e.y + randRange(-40, 40))
-      }
-
       if (def.isSummoner) {
         spawnSummonsAround(e, wave)
+      }
+
+      if (def.drops) {
+        const baseTypes = ['hp', 'radius', 'fireRate', 'damage', 'critChance', 'critDamage', 'range']
+        const num = randInt(def.drops.min, def.drops.max)
+        for (let i = 0; i < num; i++) {
+          addPickup(choose(baseTypes), e.x + randRange(-40, 40), e.y + randRange(-40, 40))
+        }
       }
     }
 
     function damagePlayer(amount, dtBased = false) {
-      const p = state.player
       if (state.tempBuffs.immortal > 0) return
+      const p = state.player
       const dmg = dtBased ? amount : amount
       p.hp -= dmg
       if (p.hp < 0) p.hp = 0
@@ -566,14 +556,22 @@ export default function App() {
     function loop(now) {
       const dt = (now - last) / 1000
       last = now
+
       update(dt)
       draw()
+
       rafId = requestAnimationFrame(loop)
     }
 
     function update(dt) {
-      const { player } = state
-      state.time += dt
+      const p = state.player
+
+      if (pausedRef.current || gameOverRef.current) {
+        // только время оставим для HUD
+        state.elapsed += dt
+        return
+      }
+
       state.elapsed += dt
 
       // таймеры бафов
@@ -583,8 +581,8 @@ export default function App() {
           if (state.tempBuffs[key] < 0) state.tempBuffs[key] = 0
         }
       }
-      player.immortalTimer = state.tempBuffs.immortal
-      player.xpBoostTimer = state.tempBuffs.xpBoost
+      p.immortalTimer = state.tempBuffs.immortal
+      p.xpBoostTimer = state.tempBuffs.xpBoost
 
       // движение игрока
       const mv = { x: leftJoy.current.x, y: leftJoy.current.y }
@@ -592,63 +590,53 @@ export default function App() {
       if (mvLen > 0.05) {
         const nx = mv.x / mvLen
         const ny = mv.y / mvLen
-        player.x += nx * player.speed * dt
-        player.y += ny * player.speed * dt
+        p.x += nx * p.speed * dt
+        p.y += ny * p.speed * dt
       }
 
-      player.x = clamp(player.x, -HALF_WORLD + player.radius, HALF_WORLD - player.radius)
-      player.y = clamp(player.y, -HALF_WORLD + player.radius, HALF_WORLD - player.radius)
+      p.x = clamp(p.x, -HALF_WORLD + p.radius, HALF_WORLD - p.radius)
+      p.y = clamp(p.y, -HALF_WORLD + p.radius, HALF_WORLD - p.radius)
 
-      // выбор оружия по уровню
-      const weapon = getCurrentWeapon()
+      const weapon = getWeaponByLevel()
       state.weaponKey = weapon.name
 
       // стрельба
       if (state.fireCooldown > 0) state.fireCooldown -= dt
-      const sh = { x: rightJoy.current.x, y: rightJoy.current.y }
-      const aimLen = Math.hypot(sh.x, sh.y)
+      const aim = { x: rightJoy.current.x, y: rightJoy.current.y }
+      const aimLen = Math.hypot(aim.x, aim.y)
 
       if (weapon.type === 'laser') {
-        // лазер — частые тики урона вдоль луча
         const baseCd = 1 / weapon.baseFireRate
         const rateMul =
-          player.fireRateMul *
-          player.baseFireRateMul *
-          (state.tempBuffs.tempFireRate > 0 ? 1.6 : 1)
+          p.fireRateMul * p.baseFireRateMul * (state.tempBuffs.tempFireRate > 0 ? 1.6 : 1)
         const cd = baseCd / rateMul
+
         if (aimLen > 0.25 && state.fireCooldown <= 0) {
           state.fireCooldown = cd
-          const nx = sh.x / aimLen
-          const ny = sh.y / aimLen
-          const range = weapon.baseRange * player.rangeMul * (state.tempBuffs.tempRange > 0 ? 1.5 : 1)
+          const nx = aim.x / aimLen
+          const ny = aim.y / aimLen
+          const range =
+            weapon.baseRange * p.rangeMul * (state.tempBuffs.tempRange > 0 ? 1.5 : 1)
           const dmgBase = weapon.baseDamage * 0.5
           const dmgMul =
-            player.damageMul *
-            player.baseDamageMul *
-            (state.tempBuffs.tempDamage > 0 ? 1.5 : 1)
-          const totalBase = dmgBase * dmgMul
+            p.damageMul * p.baseDamageMul * (state.tempBuffs.tempDamage > 0 ? 1.5 : 1)
 
-          // луч — просто проверяем врагов на расстоянии до range
           for (const e of state.enemies) {
-            const dx = e.x - player.x
-            const dy = e.y - player.y
+            const dx = e.x - p.x
+            const dy = e.y - p.y
             const proj = dx * nx + dy * ny
             if (proj <= 0 || proj > range) continue
-            const px = player.x + nx * proj
-            const py = player.y + ny * proj
+            const px = p.x + nx * proj
+            const py = p.y + ny * proj
             const dist2 = (e.x - px) * (e.x - px) + (e.y - py) * (e.y - py)
             const rr = e.r * e.r + 36
             if (dist2 <= rr) {
-              let dmg = totalBase
-              // криты
+              let dmg = dmgBase * dmgMul
               let chance =
-                player.critChance +
-                (state.tempBuffs.tempCrit > 0 ? 0.2 : 0) // временный +20%
+                p.critChance + (state.tempBuffs.tempCrit > 0 ? 0.2 : 0)
               chance = clamp(chance, 0, 0.75)
-              let mult = player.critMult
-              if (Math.random() < chance) {
-                mult *= 1.5
-              }
+              let mult = p.critMult
+              if (Math.random() < chance) mult *= 1.5
               dmg *= mult
               e.hp -= dmg
             }
@@ -657,40 +645,30 @@ export default function App() {
       } else {
         const baseCd = 1 / weapon.baseFireRate
         const rateMul =
-          player.fireRateMul *
-          player.baseFireRateMul *
-          (state.tempBuffs.tempFireRate > 0 ? 1.6 : 1)
+          p.fireRateMul * p.baseFireRateMul * (state.tempBuffs.tempFireRate > 0 ? 1.6 : 1)
         const cd = baseCd / rateMul
 
         if (aimLen > 0.25 && state.fireCooldown <= 0) {
           state.fireCooldown = cd
-          const nx = sh.x / aimLen
-          const ny = sh.y / aimLen
-
+          const nx = aim.x / aimLen
+          const ny = aim.y / aimLen
           const spreadRad = (weapon.spreadDeg * Math.PI) / 180
           const pellets = weapon.pellets
-
           const range =
-            weapon.baseRange *
-            player.rangeMul *
-            (state.tempBuffs.tempRange > 0 ? 1.5 : 1)
-          const speed =
-            weapon.bulletSpeed *
-            player.bulletSpeedMul *
-            (state.tempBuffs.tempRange > 0 ? 1.0 : 1.0)
+            weapon.baseRange * p.rangeMul * (state.tempBuffs.tempRange > 0 ? 1.5 : 1)
+          const speed = weapon.bulletSpeed * p.bulletSpeedMul
           const dmgBase = weapon.baseDamage
           const dmgMul =
-            player.damageMul *
-            player.baseDamageMul *
-            (state.tempBuffs.tempDamage > 0 ? 1.5 : 1)
+            p.damageMul * p.baseDamageMul * (state.tempBuffs.tempDamage > 0 ? 1.5 : 1)
 
+          const baseAngle = Math.atan2(ny, nx)
           for (let i = 0; i < pellets; i++) {
             const angOffset = pellets === 1 ? 0 : randRange(-spreadRad, spreadRad)
-            const ax = Math.cos(Math.atan2(ny, nx) + angOffset)
-            const ay = Math.sin(Math.atan2(ny, nx) + angOffset)
+            const ax = Math.cos(baseAngle + angOffset)
+            const ay = Math.sin(baseAngle + angOffset)
             state.bullets.push({
-              x: player.x + ax * (player.radius + 8),
-              y: player.y + ay * (player.radius + 8),
+              x: p.x + ax * (p.radius + 8),
+              y: p.y + ay * (p.radius + 8),
               vx: ax * speed,
               vy: ay * speed,
               r: 4,
@@ -705,10 +683,9 @@ export default function App() {
         }
       }
 
-      // обновление пуль игрока
+      // пули игрока
       for (let i = state.bullets.length - 1; i >= 0; i--) {
         const b = state.bullets[i]
-        if (b.weaponType === 'laser') continue
         b.x += b.vx * dt
         b.y += b.vy * dt
         b.life -= dt
@@ -717,11 +694,11 @@ export default function App() {
         }
       }
 
-      // враги движутся к игроку
+      // движение врагов
       for (const e of state.enemies) {
         const def = enemyDef(e, state.wave)
-        const dx = player.x - e.x
-        const dy = player.y - e.y
+        const dx = p.x - e.x
+        const dy = p.y - e.y
         const dist = Math.hypot(dx, dy)
         if (dist > 1) {
           const nx = dx / dist
@@ -732,16 +709,15 @@ export default function App() {
         }
       }
 
-      // враги-стрелки стреляют
+      // стрелки стреляют
       for (const e of state.enemies) {
         if (e.bossType || e.typeKey !== 'shooter') continue
-        // простая автострельба: по таймеру в enemy
         if (!e.shootCd) e.shootCd = randRange(0, 1)
         e.shootCd -= dt
         if (e.shootCd <= 0) {
           e.shootCd = 1
-          const dx = player.x - e.x
-          const dy = player.y - e.y
+          const dx = p.x - e.x
+          const dy = p.y - e.y
           const dist = Math.hypot(dx, dy)
           if (dist < 1200) {
             const nx = dx / dist
@@ -753,14 +729,14 @@ export default function App() {
               vx: nx * speed,
               vy: ny * speed,
               r: 4,
-              dmg: def.dps || 8,
+              dmg: ENEMY_TYPES.shooter.dps,
               life: 2,
             })
           }
         }
       }
 
-      // обновление вражеских пуль
+      // пули врагов
       for (let i = state.enemyBullets.length - 1; i >= 0; i--) {
         const b = state.enemyBullets[i]
         b.x += b.vx * dt
@@ -770,9 +746,9 @@ export default function App() {
           state.enemyBullets.splice(i, 1)
           continue
         }
-        const dx = b.x - player.x
-        const dy = b.y - player.y
-        const rr = (b.r + player.radius) * (b.r + player.radius)
+        const dx = b.x - p.x
+        const dy = b.y - p.y
+        const rr = (b.r + p.radius) * (b.r + p.radius)
         if (dx * dx + dy * dy <= rr) {
           damagePlayer(b.dmg)
           state.enemyBullets.splice(i, 1)
@@ -782,15 +758,15 @@ export default function App() {
       // столкновения врагов с игроком
       for (const e of state.enemies) {
         const def = enemyDef(e, state.wave)
-        const dx = e.x - player.x
-        const dy = e.y - player.y
-        const rr = (e.r + player.radius) * (e.r + player.radius)
+        const dx = e.x - p.x
+        const dy = e.y - p.y
+        const rr = (e.r + p.radius) * (e.r + p.radius)
         if (dx * dx + dy * dy <= rr) {
           damagePlayer(def.dps * dt, true)
         }
       }
 
-      // столкновения пуль игрока с врагами
+      // попадания пуль по врагам
       for (let i = state.bullets.length - 1; i >= 0; i--) {
         const b = state.bullets[i]
         let hit = false
@@ -800,16 +776,13 @@ export default function App() {
           const rr = (e.r + b.r) * (e.r + b.r)
           if (dx * dx + dy * dy <= rr) {
             hit = true
-            // рассчёт урона
             const p = state.player
             let dmg = b.dmgBase * b.dmgMul
             let chance =
               p.critChance + (state.tempBuffs.tempCrit > 0 ? 0.2 : 0)
             chance = clamp(chance, 0, 0.75)
             let mult = p.critMult
-            if (Math.random() < chance) {
-              mult *= 1.5
-            }
+            if (Math.random() < chance) mult *= 1.5
             dmg *= mult
             e.hp -= dmg
 
@@ -841,31 +814,32 @@ export default function App() {
         }
       }
 
-      // пикапы / магнит
+      // магнит и сбор пикапов
       for (let i = state.pickups.length - 1; i >= 0; i--) {
-        const pck = state.pickups[i]
-        const dx = pck.x - player.x
-        const dy = pck.y - player.y
+        const pk = state.pickups[i]
+        const dx = pk.x - p.x
+        const dy = pk.y - p.y
         const dist = Math.hypot(dx, dy)
-        if (dist <= player.magnetRadius) {
+
+        if (dist <= p.magnetRadius) {
           const nx = dx / dist
           const ny = dy / dist
-          pck.x -= nx * 400 * dt
-          pck.y -= ny * 400 * dt
+          pk.x -= nx * 400 * dt
+          pk.y -= ny * 400 * dt
         }
-        const rr = (pck.r + player.radius) * (pck.r + player.radius)
+
+        const rr = (pk.r + p.radius) * (pk.r + p.radius)
         if (dx * dx + dy * dy <= rr) {
-          // забираем
-          if (pck.type === 'xpBoost' || pck.type === 'immortal' || pck.type.startsWith('temp')) {
-            applyTempPickup(pck.type)
+          if (pk.type === 'xpBoost' || pk.type === 'immortal' || pk.type.startsWith('temp')) {
+            applyTempPickup(pk.type)
           } else {
-            applyPermanentPickup(pck.type)
+            applyPermanentPickup(pk.type)
           }
           state.pickups.splice(i, 1)
         }
       }
 
-      // волны: если врагов нет и waveInProgress было true — старт новой
+      // волновая логика
       if (state.waveInProgress && state.enemies.length === 0) {
         state.waveInProgress = false
       }
@@ -874,31 +848,33 @@ export default function App() {
         spawnEnemiesForWave()
       }
 
-      // камера следует за игроком
-      const speedFactor = 1 + (player.speed - BASE_PLAYER.speed) / BASE_PLAYER.speed * 0.05
-      const targetX = player.x
-      const targetY = player.y
+      // камера
+      const targetX = p.x
+      const targetY = p.y
       state.cam.x = lerp(state.cam.x, targetX, 0.15)
       state.cam.y = lerp(state.cam.y, targetY, 0.15)
 
-      // смерть игрока — можно просто стопать движение/стрельбу
-      if (player.hp <= 0) {
-        // Ничего не делаем особого, можно добавить рестарт
+      // смерть игрока
+      if (p.hp <= 0 && !gameOverRef.current) {
+        gameOverRef.current = true
+        pausedRef.current = true
+        setGameOver(true)
+        setPaused(true)
       }
     }
 
     function draw() {
-      const { w, h, cam, player } = state
+      const { w, h, cam, player: p } = state
       ctx.clearRect(0, 0, w, h)
 
-      // фон: мягкий градиент
+      // фон
       const grd = ctx.createLinearGradient(0, 0, 0, h)
       grd.addColorStop(0, '#020617')
       grd.addColorStop(1, '#020617')
       ctx.fillStyle = grd
       ctx.fillRect(0, 0, w, h)
 
-      // сетка с параллаксом
+      // сетка
       ctx.save()
       const gridSize = 80
       const parallax = 0.3
@@ -919,18 +895,19 @@ export default function App() {
       ctx.restore()
 
       function worldToScreen(wx, wy) {
-        const sx = (wx - cam.x) + w / 2
-        const sy = (wy - cam.y) + h / 2
-        return { x: sx, y: sy }
+        return {
+          x: (wx - cam.x) + w / 2,
+          y: (wy - cam.y) + h / 2,
+        }
       }
 
       // пикапы
-      for (const pck of state.pickups) {
-        const pos = worldToScreen(pck.x, pck.y)
-        const def = PICKUP_TYPES[pck.type]
+      for (const pk of state.pickups) {
+        const pos = worldToScreen(pk.x, pk.y)
+        const def = PICKUP_TYPES[pk.type]
         ctx.beginPath()
         ctx.fillStyle = def ? def.color : '#e5e7eb'
-        ctx.arc(pos.x, pos.y, pck.r, 0, Math.PI * 2)
+        ctx.arc(pos.x, pos.y, pk.r, 0, Math.PI * 2)
         ctx.fill()
       }
 
@@ -939,7 +916,6 @@ export default function App() {
         const pos = worldToScreen(e.x, e.y)
         const def = enemyDef(e, state.wave)
         const color = def.color || '#f97373'
-        // glow
         ctx.beginPath()
         ctx.fillStyle = color
         ctx.shadowColor = color
@@ -971,21 +947,21 @@ export default function App() {
       }
 
       // игрок
-      const pPos = worldToScreen(player.x, player.y)
+      const pPos = worldToScreen(p.x, p.y)
       ctx.beginPath()
       ctx.fillStyle = '#38bdf8'
       ctx.shadowColor = '#38bdf8'
       ctx.shadowBlur = 12
-      ctx.arc(pPos.x, pPos.y, player.radius, 0, Math.PI * 2)
+      ctx.arc(pPos.x, pPos.y, p.radius, 0, Math.PI * 2)
       ctx.fill()
       ctx.shadowBlur = 0
 
-      // HUD
+      // HUD слева
       ctx.fillStyle = '#e5e7eb'
       ctx.font = '14px system-ui, -apple-system, BlinkMacSystemFont, sans-serif'
       ctx.textAlign = 'left'
 
-      ctx.fillText(`HP: ${player.hp.toFixed(0)} / ${player.maxHp}`, 16, 24)
+      ctx.fillText(`HP: ${p.hp.toFixed(0)} / ${p.maxHp}`, 16, 24)
       ctx.fillText(`XP: ${state.xp.toFixed(0)} / ${state.xpToNext}`, 16, 44)
       ctx.fillText(`LVL: ${state.level}`, 16, 64)
       ctx.fillText(`Wave: ${state.wave}`, 16, 84)
@@ -1021,11 +997,35 @@ export default function App() {
       if (state.tempBuffs.tempCrit > 0) {
         ctx.fillStyle = '#facc15'
         ctx.fillText(`CRIT buff: ${state.tempBuffs.tempCrit.toFixed(0)}s`, 16, y)
-        y += 18
       }
+
+      // HUD справа — все статы
+      ctx.textAlign = 'right'
+      ctx.fillStyle = '#e5e7eb'
+      let ry = 24
+
+      ctx.fillText(`DMG x${p.damageMul.toFixed(2)}`, w - 16, ry); ry += 18
+      ctx.fillText(`FIRE x${p.fireRateMul.toFixed(2)}`, w - 16, ry); ry += 18
+      ctx.fillText(`RANGE x${p.rangeMul.toFixed(2)}`, w - 16, ry); ry += 18
+      ctx.fillText(`CRIT ${Math.round(p.critChance * 100)}%`, w - 16, ry); ry += 18
+      ctx.fillText(`C.MULT x${p.critMult.toFixed(2)}`, w - 16, ry); ry += 18
+      ctx.fillText(`MAGNET ${Math.round(p.magnetRadius)}`, w - 16, ry); ry += 18
+      ctx.fillText(`SPD ${Math.round(p.speed)}`, w - 16, ry); ry += 18
+
+      if (state.tempBuffs.xpBoost > 0) {
+        ctx.fillStyle = '#22c55e'
+        ctx.fillText(`XPx2 ${state.tempBuffs.xpBoost.toFixed(0)}s`, w - 16, ry)
+        ry += 18
+      }
+      if (state.tempBuffs.immortal > 0) {
+        ctx.fillStyle = '#64748b'
+        ctx.fillText(`IMM ${state.tempBuffs.immortal.toFixed(0)}s`, w - 16, ry)
+        ry += 18
+      }
+
+      ctx.textAlign = 'left'
     }
 
-    // старт
     spawnEnemiesForWave()
     let raf = requestAnimationFrame(loop)
 
@@ -1033,6 +1033,8 @@ export default function App() {
       cancelAnimationFrame(raf)
     }
   }, [size.w, size.h])
+
+  // ---- joystick handlers ----
 
   function updateJoystickVector(e, joyRef) {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -1090,9 +1092,21 @@ export default function App() {
   const leftHandlers = makeHandlers(leftJoy)
   const rightHandlers = makeHandlers(rightJoy)
 
+  function togglePause() {
+    if (gameOverRef.current) return
+    const newVal = !pausedRef.current
+    pausedRef.current = newVal
+    setPaused(newVal)
+  }
+
+  function restartGame() {
+    window.location.reload()
+  }
+
   return (
     <div className="game-root">
       <canvas ref={canvasRef} className="game-canvas" />
+
       <div className="joystick-layer">
         <div className="joystick-zone left" {...leftHandlers}>
           <div className="joystick-circle" />
@@ -1101,6 +1115,19 @@ export default function App() {
           <div className="joystick-circle" />
         </div>
       </div>
+
+      <button className="pause-btn" onClick={togglePause}>
+        {paused ? '▶' : 'II'}
+      </button>
+
+      {gameOver && (
+        <div className="game-over-box">
+          <div className="game-over-title">GAME OVER</div>
+          <button className="restart-btn" onClick={restartGame}>
+            Restart
+          </button>
+        </div>
+      )}
     </div>
   )
-                          }
+}
