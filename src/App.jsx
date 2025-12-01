@@ -89,7 +89,6 @@ export default function App() {
     }
 
     let last = performance.now()
-    let raf
 
     function loop(now) {
       const dt = (now - last) / 1000
