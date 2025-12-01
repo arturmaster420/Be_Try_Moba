@@ -1,0 +1,1 @@
+export default function App(){return <div>Be_Try_Moba</div>}
