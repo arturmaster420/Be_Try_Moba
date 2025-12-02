@@ -9,7 +9,7 @@ export function renderGame(ctx, state, viewW, viewH) {
   //  - в портрете scale = 1 (как раньше)
   //  - в горизонтали scale ~0.75, чтобы видеть больше карты вокруг игрока
   const aspect = viewW / viewH;
-  const scale = aspect > 1 ? 0.75 : 1.0;
+  const scale = aspect > 1 ? 0.5 : 1.0;
 
   function worldToScreen(x, y) {
     return {
