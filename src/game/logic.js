@@ -498,11 +498,6 @@ export function updateGame(state, input, dt) {
   const dx = state.player.x - e.x;
   const dy = state.player.y - e.y;
   const dist = Math.hypot(dx, dy) || 1;
-    
-  const s = e.speed * dt;
-  e.x += (dx / dist) * s;
-  e.y += (dy / dist) * s;
-    }
 
   // базовая скорость врага
   let spd = e.speed;
