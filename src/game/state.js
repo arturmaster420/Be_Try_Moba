@@ -9,7 +9,7 @@ const BASE_PLAYER = {
   radius: 18,
   maxHp: 100,
   hp: 100,
-  speed: 160,
+  speed: 320,
   baseDamageMul: 1,
   damageMul: 1,
   baseFireRateMul: 1,
