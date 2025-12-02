@@ -495,17 +495,24 @@ export function updateGame(state, input, dt) {
 
   // движение врагов
   for (const e of state.enemies) {
-    const def = enemyDef(e, state.wave);
-    const dx = p.x - e.x;
-    const dy = p.y - e.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > 1) {
-      const nx = dx / dist;
-      const ny = dy / dist;
-      const speed = def.speed ? def.speed(state.wave) : 60;
-      e.x += nx * speed * dt;
-      e.y += ny * speed * dt;
-    }
+  const dx = state.player.x - e.x;
+  const dy = state.player.y - e.y;
+  const dist = Math.hypot(dx, dy) || 1;
+
+  // базовая скорость врага
+  let spd = e.speed;
+
+  // фиолетовые (fast) никогда не быстрее игрока
+  if (e.typeKey === "fast") {
+    const basePlayerSpeed =
+      state.player.baseSpeed || state.player.speed || 220;
+    const maxFastSpeed = basePlayerSpeed * 0.95; // максимум 95% скорости игрока
+    if (spd > maxFastSpeed) spd = maxFastSpeed;
+  }
+
+  const s = spd * dt;
+  e.x += (dx / dist) * s;
+  e.y += (dy / dist) * s;
   }
 
   // стрелки (обычные и boss4) стреляют
