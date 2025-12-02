@@ -63,8 +63,16 @@ function addXp(state, amount) {
 }
 
 function enemyDef(e, wave) {
-  if (e.bossType) return BOSS_TYPES[e.bossType];
-  return ENEMY_TYPES[e.typeKey];
+  // сначала боссы, но только если реально есть такой ключ
+  if (e.bossType && BOSS_TYPES[e.bossType]) {
+    return BOSS_TYPES[e.bossType];
+  }
+  // потом обычные типы
+  if (ENEMY_TYPES[e.typeKey]) {
+    return ENEMY_TYPES[e.typeKey];
+  }
+  // запасной вариант — обычный зомби, чтобы не падать
+  return ENEMY_TYPES.normal;
 }
 
 function spawnSummonsAround(state, boss, wave) {
@@ -92,6 +100,12 @@ function onEnemyKilled(state, e) {
   addXp(state, 1 + (e.bossType ? 4 : 0));
   const def = enemyDef(e, wave);
 
+  // 🔹 Shadow — не босс, проверяем по typeKey
+  if (!e.bossType && e.typeKey === "shadow") {
+    addPickup(state, "immortal", e.x, e.y);
+    return;
+  }
+
   if (e.bossType === "bossXp") {
     addPickup(state, "xpBoost", e.x, e.y);
     return;
@@ -109,12 +123,9 @@ function onEnemyKilled(state, e) {
     }
     return;
   }
-  if (e.bossType === "shadow") {
-    addPickup(state, "immortal", e.x, e.y);
-    return;
-  }
 
   if (!e.bossType) {
+    // обычные враги
     if (Math.random() < 0.1) {
       const baseTypes = [
         "hp",
@@ -134,6 +145,7 @@ function onEnemyKilled(state, e) {
     return;
   }
 
+  // 🔹 дальше — настоящие боссы
   if (def.drops?.mega) {
     // финальный босс: +50% к постоянным статам (кроме критов и движения)
     const p = state.player;
@@ -198,7 +210,7 @@ function spawnEnemiesForWave(state) {
     });
   }
 
-  // Shadow каждая 3-я волна начиная с 3
+  // 🔹 Shadow — обычный враг, НЕ босс
   if (wave >= 3 && wave % 3 === 0) {
     const dist = randRange(1600, 2000);
     const ang = Math.random() * Math.PI * 2;
@@ -207,7 +219,7 @@ function spawnEnemiesForWave(state) {
     const def = ENEMY_TYPES.shadow;
     state.enemies.push({
       typeKey: "shadow",
-      bossType: "shadow",
+      bossType: null,
       x: clamp(ex, -HALF_WORLD, HALF_WORLD),
       y: clamp(ey, -HALF_WORLD, HALF_WORLD),
       r: def.radius,
@@ -553,7 +565,7 @@ export function updateGame(state, input, dt) {
     }
   }
 
-  // волновая логика
+  // волны
   if (state.waveInProgress && state.enemies.length === 0) {
     state.waveInProgress = false;
   }
@@ -562,9 +574,7 @@ export function updateGame(state, input, dt) {
     spawnEnemiesForWave(state);
   }
 
-  // камера
-  const targetX = p.x;
-  const targetY = p.y;
-  state.cam.x = targetX; // сглаживание будем делать в рендере
-  state.cam.y = targetY;
+  // камера (центр на игроке, смещение по Y делается в render)
+  state.cam.x = p.x;
+  state.cam.y = p.y;
 }
