@@ -1,6 +1,8 @@
 
 import { BUFF_DURATIONS } from "./pickups";
 import { WORLD_SIZE } from "./enemies";
+import { MAX_DAMAGE_MUL, MAX_FIRE_MUL, MAX_RANGE_MUL, MAX_CRIT_MULT, MAX_MAGNET, MAX_SPEED } from "./constants";
+
 
 export const HALF_WORLD = WORLD_SIZE / 2;
 
@@ -90,19 +92,18 @@ export function recalcPlayerStatsFromBuffs(state) {
     critMult *= 1.6;
   }
 
-  p.damageMul = damageMul;
-  p.fireRateMul = fireMul;
-  p.rangeMul = rangeMul;
-  p.speed = p.baseSpeed * speedMul;
-  p.magnetRadius = p.baseMagnetRadius * magnetMul;
-  p.critChance = critChance;
-  p.critMultiplier = critMult;
-}
+  
+  
+  
+    p.damageMul = Math.min(damageMul, MAX_DAMAGE_MUL);
+  p.fireRateMul = Math.min(fireMul, MAX_FIRE_MUL);
+  p.rangeMul = Math.min(rangeMul, MAX_RANGE_MUL);
+  p.speed = Math.min(p.baseSpeed * speedMul, MAX_SPEED);
+  p.magnetRadius = Math.min(p.baseMagnetRadius * magnetMul, MAX_MAGNET);
+    p.critChance = critChance;
+  p.critMultiplier = Math.min(critMult, MAX_CRIT_MULT);
 
-export function tickBuffTimers(state, dt) {
-  const b = state.tempBuffs;
-  for (const key of Object.keys(b)) {
-    if (b[key] > 0) {
+
       b[key] -= dt;
       if (b[key] <= 0) {
         b[key] = 0;
