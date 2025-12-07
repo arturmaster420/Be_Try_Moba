@@ -68,7 +68,7 @@ export class Player {
 
   xpToNext() {
     // Faster leveling: requirements reduced by 2x
-    return Math.max(1, Math.floor((20 + this.level * 5) / 10));
+    return Math.max(1, Math.floor((20 + this.level * 5) / 8));
   }
 
   gainXP(amount, state) {
