@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: "./",
+  base: "/Be_Try_Moba/",
   server: {
     host: true,
     port: 5175,
